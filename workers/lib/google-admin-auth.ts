@@ -1,7 +1,7 @@
 // Single-administrator Google OpenID Connect login for deployments that cannot
 // enable Cloudflare Access. All protected routes still deny anonymous requests.
 import { createRemoteJWKSet, jwtVerify, SignJWT } from "jose";
-import { isAllowedAccessEmail } from "./access-policy";
+import { isAllowedAccessEmail } from "./access-policy.ts";
 
 export interface GoogleAdminEnv {
   ADMIN_ORIGIN?: string;
