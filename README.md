@@ -43,6 +43,13 @@ https://github.com/cloudflare/agentic-inbox/issues/4#issuecomment-4269118513
 - **Auto-draft on new email** — Agent automatically reads inbound emails and generates draft replies, always requiring explicit confirmation before sending
 - **Configurable and persistent** — Custom system prompts per mailbox, persistent chat history, streaming markdown responses, and tool call visibility
 
+## Attachment behavior in this fork
+
+- Uploaded images are sent with their original bytes. The previous automatic EXIF/ICC stripping has been removed because it could change orientation, color, or animation.
+- JPEG, PNG, GIF, and WebP can appear inline in the composer. Other file types are attached normally.
+- Removing an inline image attachment also removes its editor image. Sending is blocked if an unlinked base64 image remains in the body.
+- **Draft limitation:** the current drafts API cannot persist MIME attachments. Saving a draft with files or inline images is blocked with a clear warning, rather than silently losing them.
+
 ## Stack
 
 - **Frontend:** React 19, React Router v7, Tailwind CSS, Zustand, TipTap, `@cloudflare/kumo`

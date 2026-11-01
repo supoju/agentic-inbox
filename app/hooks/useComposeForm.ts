@@ -7,7 +7,6 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
 	buildQuotedReplyBlock,
 	escapeHtml,
-	formatBytes,
 	formatComposeDate,
 	getSignatureBlock,
 	htmlToPlainText,
@@ -15,7 +14,7 @@ import {
 	stripHtml,
 	toEmailListValue,
 } from "~/lib/utils";
-import { optimizeImageLossless } from "~/lib/lossless-image-optimizer";
+import { inlineImageSource, prepareInlineImages, removeInlineImage } from "~/lib/inline-attachments";
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from "../../shared/email-limits";
 import { useDeleteEmail, useForwardEmail, useReplyToEmail, useSaveDraft, useSendEmail } from "~/queries/emails";
 import { useMailbox } from "~/queries/mailboxes";
@@ -68,6 +67,7 @@ export interface PendingAttachment {
 const MAX_FILE_SIZE = MAX_ATTACHMENT_BYTES;
 const MAX_TOTAL_SIZE = MAX_ATTACHMENT_BYTES;
 const MAX_FILE_COUNT = MAX_ATTACHMENT_COUNT;
+const INLINE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 function getPrefixedSubject(subject: string, prefix: "Re" | "Fwd") {
 	const expectedPrefix = `${prefix}: `;
@@ -242,34 +242,16 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 
 		const fileArray = Array.from(files);
 		for (let i = 0; i < fileArray.length; i++) {
-			let file = fileArray[i];
+			const file = fileArray[i];
 
 			if (attachments.length + newAttachments.length >= MAX_FILE_COUNT) {
 				setError(`最多只能添加 ${MAX_FILE_COUNT} 个附件。`);
 				break;
 			}
 
-			// Optimize images losslessly before size checks
-			if (file.type.startsWith("image/")) {
-				try {
-					const result = await optimizeImageLossless(file);
-					if (result.saved > 0) {
-						file = result.optimizedFile;
-						// Show toast for meaningful savings (> 100KB)
-						if (result.saved > 100 * 1024) {
-							toastManager.add({
-								title: `图片已无损优化：${formatBytes(result.originalSize)} → ${formatBytes(result.optimizedSize)}`,
-							});
-						}
-					}
-				} catch (err) {
-					console.warn('Failed to optimize image:', err);
-					// Continue with original file
-				}
-			}
-
+			// Attach original bytes: stripping EXIF/ICC may alter orientation or colors.
 			if (file.size > MAX_FILE_SIZE) {
-				setError(`文件 "${file.name}" 太大（无损压缩后仍超过 18 MiB 限制）。`);
+				setError(`文件 "${file.name}" 太大（单个附件最大 18 MiB）。`);
 				continue;
 			}
 
@@ -290,22 +272,19 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 					reader.readAsDataURL(file);
 				});
 
-				const isImage = file.type.startsWith("image/");
-				
-				// For images, insert into editor and mark as inline
-				if (isImage && editorInsertImageRef.current) {
-					const dataUrl = `data:${file.type};base64,${base64}`;
-					editorInsertImageRef.current(dataUrl, file.name);
-				}
-
-				newAttachments.push({
-					id: `${Date.now()}-${i}`,
+				const isInlineImage = INLINE_IMAGE_TYPES.has(file.type) && !!editorInsertImageRef.current;
+				const attachment: PendingAttachment = {
+					id: crypto.randomUUID(),
 					filename: file.name,
 					type: file.type || "application/octet-stream",
 					size: file.size,
 					contentBase64: base64,
-					disposition: isImage ? "inline" : "attachment",
-				});
+					disposition: isInlineImage ? "inline" : "attachment",
+				};
+				if (isInlineImage) {
+					editorInsertImageRef.current?.(inlineImageSource(attachment), file.name);
+				}
+				newAttachments.push(attachment);
 
 				totalSize += file.size;
 			} catch (err) {
@@ -320,15 +299,32 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 	}, [attachments, toastManager]);
 
 	const handleRemoveAttachment = useCallback((id: string) => {
+		const attachment = attachments.find(att => att.id === id);
+		if (attachment?.disposition === "inline") {
+			const duplicateRemains = attachments.some(att =>
+				att.id !== id && att.disposition === "inline" &&
+				att.type === attachment.type && att.contentBase64 === attachment.contentBase64
+			);
+			if (!duplicateRemains) setBody(prev => removeInlineImage(prev, attachment));
+		}
 		setAttachments(prev => prev.filter(att => att.id !== id));
-	}, []);
+	}, [attachments]);
 
 	const setEditorInsertImage = useCallback((fn: (src: string, alt?: string) => void) => {
 		editorInsertImageRef.current = fn;
 	}, []);
 
 	const handleSaveDraft = async () => {
-		if (!mailboxId || isSending) return; setIsSavingDraft(true); setError(null);
+		if (!mailboxId || isSending) return;
+		// The existing drafts API stores only text/HTML, not MIME attachments.
+		// Fail visibly instead of silently dropping images or other files.
+		if (attachments.length > 0 || prepareInlineImages(body, []).hasUnlinkedImage) {
+			const message = "目前草稿暂不支持保存附件或正文图片。请先移除附件再保存。";
+			setError(message);
+			toastManager.add({ title: message, variant: "error" });
+			return;
+		}
+		setIsSavingDraft(true); setError(null);
 		try {
 			await saveDraftMutation.mutateAsync({ mailboxId, draft: {
 				to,
@@ -359,35 +355,22 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 		const fromName = currentMailbox.settings?.fromName || currentMailbox.name;
 		const from = fromName && fromName !== currentMailbox.email ? { email: currentMailbox.email, name: fromName } : currentMailbox.email;
 		
-		// Process inline images: convert data URLs to CID references
-		let processedHtml = body;
+		// Convert editor data URLs to MIME Content-ID references before sending.
+		const inlineImages = prepareInlineImages(body, attachments);
+		if (inlineImages.hasUnlinkedImage) {
+			setError("正文中存在未绑定附件的图片，请删除该图片后重新添加。");
+			return;
+		}
+		const processedHtml = inlineImages.html;
 		const processedAttachments = attachments.map(att => {
-			const isInlineImage = att.disposition === "inline" && att.type.startsWith("image/");
-			
-			// For inline images, generate contentId and replace in HTML
-			if (isInlineImage) {
-				const contentId = `img-${att.id}`;
-				const dataUrl = `data:${att.type};base64,${att.contentBase64}`;
-				const escapedDataUrl = dataUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-				processedHtml = processedHtml.replace(
-					new RegExp(`src="${escapedDataUrl}"`, 'g'),
-					`src="cid:${contentId}"`
-				);
-				
-				return {
-					content: att.contentBase64,
-					filename: att.filename,
-					type: att.type,
-					disposition: att.disposition,
-					contentId,
-				};
-			}
-			
+			const contentId = `img-${att.id}`;
+			const isReferenced = inlineImages.referencedContentIds.has(contentId);
 			return {
 				content: att.contentBase64,
 				filename: att.filename,
 				type: att.type,
-				disposition: att.disposition,
+				disposition: isReferenced ? "inline" as const : "attachment" as const,
+				...(isReferenced ? { contentId } : {}),
 			};
 		});
 		
