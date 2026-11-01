@@ -9,6 +9,11 @@ export interface Env extends Cloudflare.Env {
 	SESSION_SIGNING_KEY?: string;
 	/** Resend sending-only API key (Worker Secret); never commit the value. */
 	RESEND_API_KEY?: string;
+	/** Existing Gmail destination verified in Cloudflare Email Routing. */
+	INBOUND_FORWARD_TO?: string;
+	/** Read-only token (Zone:Read + Email Routing Rules:Read) for the sync UI. */
+	CLOUDFLARE_SYNC_API_TOKEN?: string;
+	CLOUDFLARE_SYNC_ACCOUNT_ID?: string;
 	POLICY_AUD: string;
 	TEAM_DOMAIN: string;
 	/** Comma-separated Cloudflare Access identities allowed to administer every mailbox. */
