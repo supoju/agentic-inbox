@@ -13,7 +13,7 @@ import {
 	useKumoToastManager,
 } from "@cloudflare/kumo";
 import { EnvelopeIcon, GlobeIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router";
 import api from "~/services/api";
@@ -32,7 +32,7 @@ import {
 } from "shared/signature-template";
 
 
-const PREFERRED_MAILBOX = "support@discoverkeywords.co";
+const PREFERRED_MAILBOX = "support@zecview.com";
 
 function mailboxTitle(email: string, mailbox?: Mailbox) {
 	const fromName = mailbox?.settings?.fromName?.trim();
@@ -43,11 +43,12 @@ function mailboxTitle(email: string, mailbox?: Mailbox) {
 }
 
 export function meta() {
-	return [{ title: "Discover Keywords 邮箱" }];
+	return [{ title: "Agentic Inbox 邮箱" }];
 }
 
 export default function HomeRoute() {
 	const toastManager = useKumoToastManager();
+	const queryClient = useQueryClient();
 	const { data: mailboxes = [], refetch: refetchMailboxes, isFetched: mailboxesFetched } = useMailboxes();
 	const { data: unreadSummary = [] } = useUnreadSummary();
 	const createMailbox = useCreateMailbox();
@@ -200,6 +201,43 @@ export default function HomeRoute() {
 		}
 	};
 
+  const [isCloudflareSyncOpen, setIsCloudflareSyncOpen] = useState(false);
+  const [isLoadingCloudflare, setIsLoadingCloudflare] = useState(false);
+  const [isSyncingCloudflare, setIsSyncingCloudflare] = useState(false);
+  const [cloudflareSyncError, setCloudflareSyncError] = useState<string | null>(null);
+  const [cloudflarePreview, setCloudflarePreview] = useState<Awaited<ReturnType<typeof api.cloudflareMailboxes>> | null>(null);
+
+  const previewCloudflare = async () => {
+    setIsCloudflareSyncOpen(true);
+    setIsLoadingCloudflare(true);
+    setCloudflareSyncError(null);
+    try {
+      setCloudflarePreview(await api.cloudflareMailboxes());
+    } catch (error) {
+      setCloudflareSyncError(error instanceof Error ? error.message : "Cloudflare 邮箱读取失败");
+    } finally {
+      setIsLoadingCloudflare(false);
+    }
+  };
+
+  const syncCloudflare = async () => {
+    setIsSyncingCloudflare(true);
+    setCloudflareSyncError(null);
+    try {
+      const result = await api.syncCloudflareMailboxes();
+      await Promise.all([
+        refetchMailboxes(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.config }),
+      ]);
+      toastManager.add({ title: "新增 " + result.created.length + " 个邮箱，已存在 " + result.existing.length + " 个" });
+      setIsCloudflareSyncOpen(false);
+    } catch (error) {
+      setCloudflareSyncError(error instanceof Error ? error.message : "同步失败");
+    } finally {
+      setIsSyncingCloudflare(false);
+    }
+  };
+
 	const isConfigured = emailAddresses.length > 0;
 	const mailboxByEmail = useMemo(() => {
 		const map = new Map<string, Mailbox>();
@@ -298,6 +336,7 @@ export default function HomeRoute() {
 							>
 								接入域名
 							</Button>
+							<Button variant="secondary" onClick={previewCloudflare}>同步 Cloudflare</Button>
 							<Button
 								variant="primary"
 								icon={<PlusIcon size={16} />}
@@ -478,6 +517,62 @@ export default function HomeRoute() {
 				</div>
 			</div>
 
+      {/* Preview the existing rules; no Cloudflare mutations. */}
+      <Dialog.Root
+        open={isCloudflareSyncOpen}
+        onOpenChange={(open) => {
+          setIsCloudflareSyncOpen(open);
+          if (!open) {
+            setCloudflareSyncError(null);
+            setCloudflarePreview(null);
+          }
+        }}
+      >
+        <Dialog size="md" className="p-6">
+          <Dialog.Title className="text-base font-semibold mb-2">
+            同步 Cloudflare 邮箱
+          </Dialog.Title>
+          <p className="text-sm text-kumo-subtle mb-4">
+            自动读取已启用的邮箱路由并建立后台邮箱，不修改 Cloudflare 规则。
+            只有路由目标已是本 Worker 的地址，才会在后台收到新邮件。
+          </p>
+          {isLoadingCloudflare && <p className="text-sm">正在读取 Cloudflare 邮箱…</p>}
+          {cloudflareSyncError && <Text variant="error" size="sm">{cloudflareSyncError}</Text>}
+          {cloudflarePreview && (
+            <div className="max-h-72 overflow-y-auto rounded-lg border border-kumo-line px-3 py-2">
+              <p className="text-sm font-medium mb-2">
+                发现 {cloudflarePreview.domains.length} 个域名，{cloudflarePreview.mailboxes.length} 个邮箱
+              </p>
+              {cloudflarePreview.mailboxes.map((mailbox) => (
+                <div key={mailbox.email} className="border-t border-kumo-line py-2 text-sm">
+                  <div className="font-medium text-kumo-default">{mailbox.email}</div>
+                  <div className="text-xs text-kumo-subtle">
+                    {mailbox.action === "forward" ? "目前转发至 " + mailbox.target : "目前由 Worker " + mailbox.target + " 接收"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-kumo-subtle mt-3">
+            不会删除邮箱、修改 MX、替换转发规则或启用付费服务。
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Dialog.Close
+              render={(props) => <Button {...props} variant="secondary" size="sm">取消</Button>}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!cloudflarePreview || cloudflarePreview.mailboxes.length === 0}
+              loading={isSyncingCloudflare}
+              onClick={syncCloudflare}
+            >
+              确认导入
+            </Button>
+          </div>
+        </Dialog>
+      </Dialog.Root>
+
 			{/* Connect domain Dialog */}
 			<Dialog.Root
 				open={isConnectOpen}
@@ -494,7 +589,7 @@ export default function HomeRoute() {
 						接入域名
 					</Dialog.Title>
 					<p className="text-sm text-kumo-subtle mb-4">
-						不用改配置、不用重新发布。填域名，再在 Cloudflare 点两下邮件路由。
+						这里只登记域名。真正收件还需要 Cloudflare Email Routing 的 Worker 规则；不要直接替换已有 Gmail 转发。
 					</p>
 					<form onSubmit={handleConnect} className="space-y-4">
 						{connectError && (
@@ -512,8 +607,8 @@ export default function HomeRoute() {
 						/>
 						<ol className="text-sm text-kumo-default space-y-2 list-decimal pl-5">
 							<li>Cloudflare 打开该域名 → Email → Email Routing → 启用（会自动加 MX）</li>
-							<li>Routing rules → Catch-all → Send to a Worker → 选 agentic-inbox</li>
-							<li>回到本页点「新建邮箱」，建 support@该域名（或任意前缀）</li>
+							<li>Routing rules → 为新邮箱地址建立 Send to a Worker 规则 → 选择 agentic-inbox-test</li>
+							<li>回到本页点「新建邮箱」。现有规则应在双投递测试后再迁移。</li>
 						</ol>
 						<p className="text-xs text-kumo-subtle">
 							第一次往 Gmail 发信可能进垃圾箱。稳定后再给该域加 SPF / DKIM / DMARC。
