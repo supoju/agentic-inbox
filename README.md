@@ -5,6 +5,8 @@
 
 > **Security hardening in progress (supoju fork).** Production deployment is not recommended until the first security pull requests have been reviewed and verified. Configure your own email domains and Cloudflare Access before sending real email. Pushes to main do **not** automatically deploy.
 
+> **Workers Free outgoing mail:** Cloudflare Email Service cannot send to arbitrary recipients on Workers Free, even though the composer can address them. An [optional Resend Free transport](docs/resend-free-outbound.md) is implemented on this branch for legitimate external recipients. It requires its own verified sending domain and Worker Secret. **No live sending or public login is enabled until those credentials and a reviewed authentication alternative are in place.**
+
 Agentic Inbox lets you send, receive, and manage emails through a modern web interface -- all powered by your own Cloudflare account. Incoming emails arrive via [Cloudflare Email Routing](https://developers.cloudflare.com/email-routing/), each mailbox is isolated in its own [Durable Object](https://developers.cloudflare.com/durable-objects/) with a SQLite database, and attachments are stored in [R2](https://developers.cloudflare.com/r2/).
 
 An **AI-powered Email Agent** can read your inbox, search conversations, and draft replies -- built with the [Cloudflare Agents SDK](https://developers.cloudflare.com/agents/) and [Workers AI](https://developers.cloudflare.com/workers-ai/).
