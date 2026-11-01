@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "agentic-inbox",
+	"name": "agentic-inbox-test",
 	"compatibility_date": "2025-11-28",
 	"main": "./workers/app.ts",
 	"observability": {
@@ -10,7 +10,7 @@
 		"nodejs_compat"
 	],
 	"vars": {
-		"DOMAINS": "",
+		"DOMAINS": "zecview.com",
 		"EMAIL_ADDRESSES": []
 	},
 	"send_email": [
@@ -22,8 +22,8 @@
 	"r2_buckets": [
 		{
 			"binding": "BUCKET",
-			"bucket_name": "agentic-inbox",
-			"preview_bucket_name": "agentic-inbox"
+			"bucket_name": "agentic-inbox-test",
+			"preview_bucket_name": "agentic-inbox-test"
 		}
 	],
 	"ai": {
