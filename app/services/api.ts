@@ -99,6 +99,23 @@ const api = {
 	getConfig: () =>
 		get<{ domains: string[]; emailAddresses: string[] }>("/api/v1/config"),
 
+  // Cloudflare Email Routing inventory (read-only) and local idempotent import.
+  cloudflareMailboxes: () =>
+    get<{
+      domains: string[];
+      mailboxes: Array<{
+        email: string;
+        domain: string;
+        ruleId: string;
+        action: "forward" | "worker";
+        target: string;
+      }>;
+    }>("/api/v1/cloudflare/mailboxes"),
+  syncCloudflareMailboxes: () =>
+    post<{ created: string[]; existing: string[]; domains: string[]; routesUntouched: true }>(
+      "/api/v1/cloudflare/mailboxes/sync",
+    ),
+
 	// Global settings
 	getSignatureTemplate: () =>
 		get<SignatureTemplate>("/api/v1/settings/signature-template"),

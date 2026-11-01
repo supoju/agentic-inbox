@@ -8,6 +8,7 @@ import { cors } from "hono/cors";
 import PostalMime from "postal-mime";
 import { z } from "zod";
 import { sendEmail, sendFailure } from "./email-sender";
+import { discoverCloudflareMailboxes } from "./lib/cloudflare-mailbox-sync";
 import { storeAttachments, type StoredAttachment } from "./lib/attachments";
 import {
 	validateSender,
@@ -122,6 +123,33 @@ async function allDomains(env: Env): Promise<string[]> {
 	return [...new Set([...envDomains(env), ...extras, ...fromMailboxes])];
 }
 
+/** Idempotent mailbox creation shared by the UI and Cloudflare sync. */
+async function ensureMailboxRecord(env: Env, email: string, name: string, settings?: Record<string, unknown>) {
+  const key = "mailboxes/" + email + ".json";
+  if (await env.BUCKET.head(key)) return { created: false as const };
+  const defaults = {
+    fromName: name,
+    forwarding: { enabled: false, email: "" },
+    signature: { enabled: false, text: "" },
+    autoReply: { enabled: false, subject: "", message: "" },
+  };
+  const template = await readSignatureTemplate(env.BUCKET);
+  if (template.enabled && template.text) {
+    defaults.signature = {
+      enabled: true,
+      text: renderSignatureTemplate(template.text, { email, fromName: name, name }),
+    };
+  }
+  const finalSettings = { ...defaults, ...settings };
+  await env.BUCKET.put(key, JSON.stringify(finalSettings));
+  const stub = env.MAILBOX.get(env.MAILBOX.idFromName(email));
+  await stub.getFolders();
+  return {
+    created: true as const,
+    mailbox: { id: email, email, name, settings: finalSettings },
+  };
+}
+
 // -- App & middleware -----------------------------------------------
 
 const app = new Hono<MailboxContext>();
@@ -148,6 +176,44 @@ app.get("/api/v1/config", async (c) => {
 	const domains = await allDomains(c.env);
 	const emailAddresses = c.env.EMAIL_ADDRESSES ?? [];
 	return c.json({ domains, emailAddresses });
+});
+
+// Read-only Cloudflare inventory and explicit, idempotent local import.
+// The outer Google-admin middleware protects both endpoints.
+app.get("/api/v1/cloudflare/mailboxes", async (c) => {
+  try {
+    return c.json(await discoverCloudflareMailboxes(c.env));
+  } catch (error) {
+    console.error("Cloudflare mailbox inventory failed:", error instanceof Error ? error.message : "unknown");
+    return c.json({ error: "无法读取 Cloudflare 邮箱规则，请检查同步 Token 的只读权限。" }, 503);
+  }
+});
+
+app.post("/api/v1/cloudflare/mailboxes/sync", async (c) => {
+  let inventory;
+  try {
+    inventory = await discoverCloudflareMailboxes(c.env);
+  } catch (error) {
+    console.error("Cloudflare mailbox sync discovery failed:", error instanceof Error ? error.message : "unknown");
+    return c.json({ error: "无法读取 Cloudflare 邮箱规则，同步已取消。" }, 503);
+  }
+  const extras = await readExtraDomains(c.env.BUCKET);
+  await writeExtraDomains(c.env.BUCKET, [...extras, ...inventory.domains]);
+  const created: string[] = [];
+  const existing: string[] = [];
+  for (const item of inventory.mailboxes) {
+    const email = item.email.toLowerCase();
+    const result = await ensureMailboxRecord(c.env, email, email.split("@")[0]);
+    if (result.created) created.push(email);
+    else existing.push(email);
+  }
+  return c.json({
+    created,
+    existing,
+    domains: inventory.domains,
+    // A mailbox can be present before its Cloudflare rule routes to this Worker.
+    routesUntouched: true,
+  });
 });
 
 const DomainBody = z.object({
@@ -214,29 +280,17 @@ app.get("/api/v1/mailboxes", async (c) => {
 });
 
 app.post("/api/v1/mailboxes", async (c) => {
-	const { name, settings, email: rawEmail } = CreateMailboxBody.parse(await c.req.json());
-	const email = rawEmail.toLowerCase();
-	const domain = email.split("@")[1] || "";
-	const allowedDomains = await allDomains(c.env);
-	const allowedAddresses = ((c.env.EMAIL_ADDRESSES ?? []) as string[]).map((a) => a.toLowerCase());
-	if (!domain || (!allowedDomains.includes(domain) && !allowedAddresses.includes(email))) {
-		return c.json({ error: "请先接入该域名" }, 403);
-	}
-	const key = `mailboxes/${email}.json`;
-	if (await c.env.BUCKET.head(key)) return c.json({ error: "Mailbox already exists" }, 409);
-	const defaultSettings = { fromName: name, forwarding: { enabled: false, email: "" }, signature: { enabled: false, text: "" }, autoReply: { enabled: false, subject: "", message: "" } };
-	const globalTemplate = await readSignatureTemplate(c.env.BUCKET);
-	if (globalTemplate.enabled && globalTemplate.text) {
-		defaultSettings.signature = {
-			enabled: true,
-			text: renderSignatureTemplate(globalTemplate.text, { email, fromName: name, name }),
-		};
-	}
-	const finalSettings = { ...defaultSettings, ...settings };
-	await c.env.BUCKET.put(key, JSON.stringify(finalSettings));
-	const stub = c.env.MAILBOX.get(c.env.MAILBOX.idFromName(email));
-	await stub.getFolders();
-	return c.json({ id: email, email, name, settings: finalSettings }, 201);
+  const { name, settings, email: rawEmail } = CreateMailboxBody.parse(await c.req.json());
+  const email = rawEmail.toLowerCase();
+  const domain = email.split("@")[1] || "";
+  const allowedDomains = await allDomains(c.env);
+  const allowedAddresses = ((c.env.EMAIL_ADDRESSES ?? []) as string[]).map((a) => a.toLowerCase());
+  if (!domain || (!allowedDomains.includes(domain) && !allowedAddresses.includes(email))) {
+    return c.json({ error: "请先接入该域名" }, 403);
+  }
+  const result = await ensureMailboxRecord(c.env, email, name, settings);
+  if (!result.created) return c.json({ error: "Mailbox already exists" }, 409);
+  return c.json(result.mailbox, 201);
 });
 
 app.get("/api/v1/mailboxes/:mailboxId", async (c) => {
@@ -477,16 +531,17 @@ async function streamToArrayBuffer(stream: ReadableStream, streamSize: number) {
 	return result;
 }
 
-async function receiveEmail(event: { raw: ReadableStream; rawSize: number }, env: Env, ctx: ExecutionContext) {
+async function receiveEmail(event: { raw: ReadableStream; rawSize: number; to?: string }, env: Env, ctx: ExecutionContext) {
 	const rawEmail = await streamToArrayBuffer(event.raw, event.rawSize);
 	const parsedEmail = await new PostalMime().parse(rawEmail);
 
-	if (!parsedEmail.to?.length || !parsedEmail.to[0].address) throw new Error("received email with empty to");
-
-	const allRecipients = parsedEmail.to.map((t) => t.address?.toLowerCase()).filter(Boolean) as string[];
+	// A valid BCC-only message may omit the To header entirely; the SMTP
+	// envelope recipient identifies the routed mailbox in that case.
+	const allRecipients = (parsedEmail.to || []).map((t) => t.address?.toLowerCase()).filter(Boolean) as string[];
 	const ccRecipients = (parsedEmail.cc || []).map((e) => e.address?.toLowerCase()).filter(Boolean) as string[];
 	const bccRecipients = (parsedEmail.bcc || []).map((e) => e.address?.toLowerCase()).filter(Boolean) as string[];
-	const candidates = [...allRecipients, ...ccRecipients, ...bccRecipients];
+	// Envelope recipient matters for BCC and mail sent through routing aliases.
+	const candidates = [event.to?.trim().toLowerCase(), ...allRecipients, ...ccRecipients, ...bccRecipients].filter(Boolean) as string[];
 
 	let mailboxId: string | undefined;
 	for (const addr of candidates) {
