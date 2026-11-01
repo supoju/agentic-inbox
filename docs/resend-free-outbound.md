@@ -29,6 +29,13 @@ acceptable-use policy. It must not be used for unsolicited cold outreach.
 - Resend's returned API resource ID is not confused with the message's
   RFC 5322 Message-ID. A successful API request means Resend accepted it,
   not that the destination inbox received it.
+- **Known threading limitation:** the send response returns only a Resend API ID,
+  not the delivered message's RFC `Message-ID`. Until the app correlates the
+  actual ID via a verified Resend `email.sent` webhook, replies to a message
+  initiated by this app may fail to group with the saved Sent item. Do not
+  mistake the app's generated placeholder for the actual outbound header.
+  A domain-scoped **sending-only** key cannot retrieve Sent message metadata;
+  do not broaden key permissions solely to work around this limitation.
 - Outbound plaintext/HTML and attachments are sent to Resend, not only
   Cloudflare. Do not use this provider for content you cannot disclose to it.
 
