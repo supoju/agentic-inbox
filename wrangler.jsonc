@@ -14,6 +14,8 @@
 	"vars": {
 		"DOMAINS": "zecview.com",
 		"OUTBOUND_EMAIL_PROVIDER": "resend",
+		"AUTH_PROVIDER": "google",
+		"ADMIN_ORIGIN": "https://inbox.zecview.com",
 		"EMAIL_ADDRESSES": []
 	},
 	"send_email": [

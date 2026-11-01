@@ -10,6 +10,10 @@ import { app as apiApp, receiveEmail } from "./index";
 import { EmailMCP } from "./mcp";
 import type { Env } from "./types";
 import { isAllowedAccessEmail } from "./lib/access-policy";
+import {
+  startGoogleLogin, finishGoogleLogin, isGoogleAdminSession,
+  isTrustedBrowserOrigin, logoutGoogleAdmin,
+} from "./lib/google-admin-auth";
 
 export { MailboxDO } from "./durableObject";
 export { EmailAgent } from "./agent";
@@ -43,12 +47,47 @@ function getAccessUrls(teamDomain: string) {
 // Main app that wraps the API and adds React Router fallback
 const app = new Hono<{ Bindings: Env }>();
 
+// Public entry points only for the OAuth code exchange. They do not expose mail data.
+app.get("/auth/login", async (c) => {
+  if (c.env.AUTH_PROVIDER !== "google") return c.text("Not found", 404);
+  return startGoogleLogin(c.env);
+});
+app.get("/auth/callback", async (c) => {
+  if (c.env.AUTH_PROVIDER !== "google") return c.text("Not found", 404);
+  return finishGoogleLogin(c.req.raw, c.env);
+});
+app.get("/auth/logout", (c) => {
+  if (c.env.AUTH_PROVIDER !== "google") return c.text("Not found", 404);
+  return logoutGoogleAdmin();
+});
+
+// Protect the entire UI, API, MCP and WebSocket surface in production.
 // Cloudflare Access JWT validation middleware (production only)
 app.use("*", async (c, next) => {
 	// Skip validation in development
 	if (import.meta.env.DEV) {
 		return next();
 	}
+
+  // Google login is an alternative to Zero Trust billing activation, with the
+  // same exact-email administrator allowlist. Missing secrets fail closed.
+  if (c.env.AUTH_PROVIDER === "google") {
+    if (!(await isGoogleAdminSession(c.req.raw, c.env))) {
+      const path = new URL(c.req.url).pathname;
+      if (path.startsWith("/api/") || path === "/mcp" || path.startsWith("/mcp/") ||
+          path.startsWith("/agents/")) {
+        return c.text("Administrator login required", 401);
+      }
+      return c.redirect("/auth/login", 302);
+    }
+    if (!isTrustedBrowserOrigin(c.req.raw, c.env.ADMIN_ORIGIN)) {
+      return c.text("Cross-origin state-changing request rejected", 403);
+    }
+    return next();
+  }
+  if (c.env.AUTH_PROVIDER && c.env.AUTH_PROVIDER !== "cloudflare") {
+    return c.text("Unsupported authentication provider", 503);
+  }
 
 	const { POLICY_AUD, TEAM_DOMAIN, ADMIN_ACCESS_EMAILS } = c.env;
 

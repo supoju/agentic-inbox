@@ -3,7 +3,9 @@
   <p><em>A self-hosted email client with an AI agent, running entirely on Cloudflare Workers</em></p>
 </div>
 
-> **Security hardening in progress (supoju fork).** Production deployment is not recommended until the first security pull requests have been reviewed and verified. Configure your own email domains and Cloudflare Access before sending real email. Pushes to main do **not** automatically deploy.
+> **Security hardening in progress (supoju fork).** Production deployment is not recommended until the first security pull requests have been reviewed and verified. Configure your email domains and a reviewed administrator login before sending real email. Pushes to main do **not** automatically deploy.
+
+> **No Zero Trust checkout:** The [Google administrator login option](docs/google-admin-login-free.md) protects `inbox.zecview.com` for `syaoyong@gmail.com` without activating a Cloudflare Zero Trust subscription. This is an unmerged test branch; OAuth client credentials and a live login review are still required.
 
 > **Workers Free outgoing mail:** Cloudflare Email Service cannot send to arbitrary recipients on Workers Free, even though the composer can address them. An [optional Resend Free transport](docs/resend-free-outbound.md) is implemented on this branch for legitimate external recipients. It requires its own verified sending domain and Worker Secret. **No live sending or public login is enabled until those credentials and a reviewed authentication alternative are in place.**
 
@@ -23,19 +25,18 @@ https://github.com/cloudflare/agentic-inbox/issues/4#issuecomment-4269118513
 
 ### To set up
 
-1. Review the configuration and deploy this fork manually after tests pass. Set your own **DOMAINS** value in `wrangler.jsonc` (the example configuration intentionally starts empty). Run `npm run deploy` after configuring Cloudflare resources and Access. Do not use the upstream project's one-click deployment button; it deploys a different repository.
+1. Review the configuration and deploy this fork manually after tests pass. Set your own **DOMAINS** value in `wrangler.jsonc` (the isolated test branch currently uses `zecview.com`). Run `npm run deploy` only after configuring Cloudflare resources and the selected login provider. Do not use the upstream project's one-click deployment button; it deploys a different repository.
 
-2. **Configure Cloudflare Access** -- Enable [one-click Cloudflare Access](https://developers.cloudflare.com/changelog/post/2025-10-03-one-click-access-for-workers/) on your Worker under Settings > Domains & Routes. The modal will show your `POLICY_AUD` and `TEAM_DOMAIN` values. `TEAM_DOMAIN` can be either your Access team URL or the full `.../cdn-cgi/access/certs` URL. **You must set these as secrets for your Worker.**
-3. **Set up Email Routing** -- In the Cloudflare dashboard, go to your domain > Email Routing and create a catch-all rule that forwards to this Worker
-4. **Enable Email Service** -- The worker needs the `send_email` binding to send outbound emails. See [Email Service docs](https://developers.cloudflare.com/email-routing/email-workers/send-email-workers/)
+2. **Configure administrator login** -- This test branch selects [Google OIDC single-admin login](docs/google-admin-login-free.md) restricted to the owner's Gmail address, avoiding Zero Trust subscription activation. To use Cloudflare Access instead, explicitly select `AUTH_PROVIDER=cloudflare` and supply its `POLICY_AUD`, `TEAM_DOMAIN`, and `ADMIN_ACCESS_EMAILS` secrets.
+3. **Set up Email Routing** -- In Cloudflare's Email Routing, start with one exact-match test address routed to the Worker. Do not replace an existing catch-all or forwarding rule until its effect is reviewed; each additional mailbox address must have an inbound route.
+4. **Configure outbound sending** -- On Workers Free, select [Resend Free](docs/resend-free-outbound.md) for arbitrary legitimate recipients and verify the sending domain. The optional Cloudflare native `send_email` binding is limited by its plan.
 5. **Create a mailbox** -- Visit your deployed app and create a mailbox for any address on your domain (e.g. `hello@example.com`)
 
-### Troubleshooting Access
+### Troubleshooting administrator login
 
 1. If you see `Invalid or expired Access token`, that usually means `POLICY_AUD` or `TEAM_DOMAIN` secrets are incorrect.
    * Resolution: [turn Access off and back on for the Worker to get the Access modal again](https://developers.cloudflare.com/changelog/post/2025-10-03-one-click-access-for-workers/), then reset your Worker secrets to the latest `POLICY_AUD` and `TEAM_DOMAIN` values shown there.
-2. If you see `Cloudflare Access must be configured in production`, this application is intentionally enforcing Cloudflare Access so your inbox is not exposed to anyone on the internet.
-   * Resolution: enable Access using [one-click Cloudflare Access for Workers](https://developers.cloudflare.com/changelog/post/2025-10-03-one-click-access-for-workers/), then set the `POLICY_AUD` and `TEAM_DOMAIN` Worker secrets from the modal values.
+2. If Google login reports missing configuration, check the four encrypted Worker Secrets and the canonical `ADMIN_ORIGIN` in [Google setup](docs/google-admin-login-free.md). Leave the Worker inaccessible until login is tested.
 
 ## Features
 
@@ -49,7 +50,7 @@ https://github.com/cloudflare/agentic-inbox/issues/4#issuecomment-4269118513
 
 This is designed for a **single operator or one trusted administrator group**. Every allowlisted identity can read and manage **all** mailboxes. There is no per-mailbox role separation.
 
-In addition to `POLICY_AUD` and `TEAM_DOMAIN`, production requires the Worker secret `ADMIN_ACCESS_EMAILS` containing the exact Cloudflare Access login email(s), separated by commas. Configure it with `wrangler secret put ADMIN_ACCESS_EMAILS` on your own account; never commit the value to Git. A missing value fails closed. Cloudflare service-token identities without an email claim are not accepted by this interface.
+All production login modes require the Worker secret `ADMIN_ACCESS_EMAILS` containing the exact allowed administrator email address(es). The Google mode also requires `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and `SESSION_SIGNING_KEY` secrets. Cloudflare Access mode instead requires `POLICY_AUD` and `TEAM_DOMAIN`. Never commit secrets. Missing values fail closed.
 
 MCP's `send_email`, `send_reply`, and `delete_email` tools are **disabled by default**. This prevents an external Agent from directly sending or permanently deleting mail merely because its instructions say to. To explicitly opt in, set `MCP_ALLOW_SEND=true` and/or `MCP_ALLOW_DELETE=true` in the Worker environment. Enabling send does **not** add a human-approval step. Reading, draft management and reversible folder actions remain available through MCP to authorized users.
 
@@ -65,7 +66,7 @@ MCP's `send_email`, `send_reply`, and `delete_email` tools are **disabled by def
 - **Frontend:** React 19, React Router v7, Tailwind CSS, Zustand, TipTap, `@cloudflare/kumo`
 - **Backend:** Hono, Cloudflare Workers, Durable Objects (SQLite), R2, Email Routing
 - **AI Agent:** Cloudflare Agents SDK (`AIChatAgent`), AI SDK v6, Workers AI (`@cf/moonshotai/kimi-k2.5`), `react-markdown` + `remark-gfm`
-- **Auth:** Cloudflare Access JWT validation (required outside local development)
+- **Auth:** Cloudflare Access JWT or Google OpenID Connect single-admin session (select one; required outside local development)
 
 ## Getting Started
 
@@ -81,7 +82,7 @@ npm run dev
 
 ### Deploy
 
-After code review, successful checks, and domain/Access configuration, deploy manually:
+After code review, successful checks, and verified domain/administrator-login configuration, deploy manually:
 
 ```bash
 npm run deploy
@@ -95,11 +96,11 @@ For internal Worker-to-Worker sending, use an explicitly authenticated service i
 
 - Cloudflare account with a domain
 - [Email Routing](https://developers.cloudflare.com/email-routing/) enabled for receiving
-- [Email Service](https://developers.cloudflare.com/email-service/) enabled for sending
+- [Resend Free](docs/resend-free-outbound.md) verified for outbound on Workers Free, or [Cloudflare Email Service](https://developers.cloudflare.com/email-service/) on a compatible plan
 - [Workers AI](https://developers.cloudflare.com/workers-ai/) enabled (for the agent)
-- [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) configured for deployed/shared environments (required in production)
+- A configured authentication provider: [Google OIDC single-admin option](docs/google-admin-login-free.md) or [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) (production requires one, not both)
 
-Any user who passes the shared Cloudflare Access policy can access all mailboxes in this app by design. This includes the MCP server at `/mcp` -- external AI tools (Claude Code, Cursor, etc.) connected via MCP can operate on any mailbox by passing a `mailboxId` parameter. There is no per-mailbox authorization; the Cloudflare Access policy is the single trust boundary.
+Any identity permitted by the configured Google or Cloudflare Access login can access all mailboxes. MCP and connected AI tools have no per-mailbox authorization; their send/delete tools remain disabled unless explicitly enabled.
 
 ## Architecture
 
