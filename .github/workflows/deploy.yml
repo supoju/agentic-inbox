@@ -19,6 +19,23 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Probe existing Worker metadata access (HTTP statuses only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          check() {
+            local status
+            status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}${2}")
+            printf '%s: HTTP %s\\n' "${1}" "${status}"
+          }
+          check bindings '/workers/services/agentic-inbox-test/environments/production/bindings'
+          check routes '/workers/services/agentic-inbox-test/environments/production/routes?show_zonename=true'
+          check custom_domains '/workers/domains/records?page=0&per_page=5&service=agentic-inbox-test&environment=production'
+          check subdomain '/workers/services/agentic-inbox-test/environments/production/subdomain'
+          check service '/workers/services/agentic-inbox-test/environments/production'
+          check schedules '/workers/scripts/agentic-inbox-test/schedules'
+
       - name: Install dependencies
         run: npm ci
 
