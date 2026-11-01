@@ -11,6 +11,7 @@
  * Zod schemas: used across route handlers to eliminate duplication.
  */
 import { z } from "zod";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from "../../shared/email-limits";
 
 // ── TypeScript Interfaces ──────────────────────────────────────────
 
@@ -87,6 +88,46 @@ export const SendEmailRequestSchema = z
 	})
 	.refine((data) => data.html || data.text, {
 		message: "Either 'html' or 'text' must be provided",
+	})
+	.superRefine((data, ctx) => {
+		const attachments = data.attachments ?? [];
+		if (attachments.length > MAX_ATTACHMENT_COUNT) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["attachments"],
+				message: `Too many attachments (maximum ${MAX_ATTACHMENT_COUNT})`,
+			});
+		}
+		let totalBytes = 0;
+		attachments.forEach((attachment, index) => {
+			const content = attachment.content;
+			// The HTTP API contract is standard, padded base64 (from FileReader).
+			if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content)) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["attachments", index, "content"],
+					message: "Attachment must contain valid base64 data",
+				});
+				return;
+			}
+			const padding = content.endsWith("==") ? 2 : content.endsWith("=") ? 1 : 0;
+			const bytes = content.length / 4 * 3 - padding;
+			totalBytes += bytes;
+			if (bytes > MAX_ATTACHMENT_BYTES) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["attachments", index, "content"],
+					message: "Attachment exceeds the 18 MiB limit",
+				});
+			}
+		});
+		if (totalBytes > MAX_ATTACHMENT_BYTES) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["attachments"],
+				message: "Combined attachments exceed the 18 MiB limit",
+			});
+		}
 	});
 
 export const SendEmailResponseSchema = z.object({

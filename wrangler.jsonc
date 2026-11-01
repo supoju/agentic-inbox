@@ -10,7 +10,7 @@
 		"nodejs_compat"
 	],
 	"vars": {
-		"DOMAINS": "discoverkeywords.co",
+		"DOMAINS": "",
 		"EMAIL_ADDRESSES": []
 	},
 	"send_email": [

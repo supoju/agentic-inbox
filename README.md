@@ -3,6 +3,8 @@
   <p><em>A self-hosted email client with an AI agent, running entirely on Cloudflare Workers</em></p>
 </div>
 
+> **Security hardening in progress (supoju fork).** Production deployment is not recommended until the first security pull requests have been reviewed and verified. Configure your own email domains and Cloudflare Access before sending real email. Pushes to main do **not** automatically deploy.
+
 Agentic Inbox lets you send, receive, and manage emails through a modern web interface -- all powered by your own Cloudflare account. Incoming emails arrive via [Cloudflare Email Routing](https://developers.cloudflare.com/email-routing/), each mailbox is isolated in its own [Durable Object](https://developers.cloudflare.com/durable-objects/) with a SQLite database, and attachments are stored in [R2](https://developers.cloudflare.com/r2/).
 
 An **AI-powered Email Agent** can read your inbox, search conversations, and draft replies -- built with the [Cloudflare Agents SDK](https://developers.cloudflare.com/agents/) and [Workers AI](https://developers.cloudflare.com/workers-ai/).
@@ -19,9 +21,7 @@ https://github.com/cloudflare/agentic-inbox/issues/4#issuecomment-4269118513
 
 ### To set up
 
-1. Deploy to Cloudflare. The deploy flow will automatically provision R2, Durable Objects, and Workers AI. You'll be prompted for **DOMAINS**, which is the domain (yourdomain.com) you want to receive emails for (email@yourdomain.com).
-
-     [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/agentic-inbox)
+1. Review the configuration and deploy this fork manually after tests pass. Set your own **DOMAINS** value in `wrangler.jsonc` (the example configuration intentionally starts empty). Run `npm run deploy` after configuring Cloudflare resources and Access. Do not use the upstream project's one-click deployment button; it deploys a different repository.
 
 2. **Configure Cloudflare Access** -- Enable [one-click Cloudflare Access](https://developers.cloudflare.com/changelog/post/2025-10-03-one-click-access-for-workers/) on your Worker under Settings > Domains & Routes. The modal will show your `POLICY_AUD` and `TEAM_DOMAIN` values. `TEAM_DOMAIN` can be either your Access team URL or the full `.../cdn-cgi/access/certs` URL. **You must set these as secrets for your Worker.**
 3. **Set up Email Routing** -- In the Cloudflare dashboard, go to your domain > Email Routing and create a catch-all rule that forwards to this Worker
@@ -64,9 +64,15 @@ npm run dev
 
 ### Deploy
 
+After code review, successful checks, and domain/Access configuration, deploy manually:
+
 ```bash
 npm run deploy
 ```
+
+The GitHub Actions deployment workflow is manual-only (`workflow_dispatch`); a push to `main` does not deploy. Outbound attachments are limited to 18 MiB of raw data in total because Cloudflare Email Service limits each full encoded message to 25 MiB.
+
+For internal Worker-to-Worker sending, use an explicitly authenticated service integration. A missing `cf-ray` header is not accepted as proof of trusted service origin.
 
 ## Prerequisites
 

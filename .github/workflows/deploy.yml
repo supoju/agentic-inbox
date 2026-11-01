@@ -1,8 +1,7 @@
 name: Deploy to Cloudflare Worker
 
+# Deployment is intentionally manual. Validate the branch and configuration first.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
