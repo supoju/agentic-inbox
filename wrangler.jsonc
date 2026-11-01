@@ -1,7 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "agentic-inbox-test",
-	"workers_dev": false,
+	"name": "agentic-inbox-mailjet-eval",
+	"workers_dev": true,
 	"preview_urls": false,
 	"compatibility_date": "2025-11-28",
 	"main": "./workers/app.ts",
@@ -13,22 +13,15 @@
 	],
 	"vars": {
 		"DOMAINS": "zecview.com",
-		"OUTBOUND_EMAIL_PROVIDER": "resend",
-		"AUTH_PROVIDER": "google",
-		"ADMIN_ORIGIN": "https://inbox.zecview.com",
+		"OUTBOUND_EMAIL_PROVIDER": "mailjet",
+		"AUTH_PROVIDER": "cloudflare",
 		"EMAIL_ADDRESSES": []
 	},
-	"send_email": [
-		{
-			"name": "EMAIL",
-			"remote": true
-		}
-	],
 	"r2_buckets": [
 		{
 			"binding": "BUCKET",
-			"bucket_name": "agentic-inbox-test",
-			"preview_bucket_name": "agentic-inbox-test"
+			"bucket_name": "agentic-inbox-mailjet-eval",
+			"preview_bucket_name": "agentic-inbox-mailjet-eval"
 		}
 	],
 	"ai": {
