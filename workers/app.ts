@@ -9,6 +9,7 @@ import { createRequestHandler } from "react-router";
 import { app as apiApp, receiveEmail } from "./index";
 import { EmailMCP } from "./mcp";
 import type { Env } from "./types";
+import { isAllowedAccessEmail } from "./lib/access-policy";
 
 export { MailboxDO } from "./durableObject";
 export { EmailAgent } from "./agent";
@@ -49,12 +50,12 @@ app.use("*", async (c, next) => {
 		return next();
 	}
 
-	const { POLICY_AUD, TEAM_DOMAIN } = c.env;
+	const { POLICY_AUD, TEAM_DOMAIN, ADMIN_ACCESS_EMAILS } = c.env;
 
 	// Fail closed in production if Access is not configured.
-	if (!POLICY_AUD || !TEAM_DOMAIN) {
+	if (!POLICY_AUD || !TEAM_DOMAIN || !ADMIN_ACCESS_EMAILS?.trim()) {
 		return c.text(
-			"Cloudflare Access must be configured in production. Set POLICY_AUD and TEAM_DOMAIN.",
+			"Cloudflare Access requires POLICY_AUD, TEAM_DOMAIN and ADMIN_ACCESS_EMAILS in production.",
 			500,
 		);
 	}
@@ -67,16 +68,19 @@ app.use("*", async (c, next) => {
 	try {
 		const { issuer, certsUrl } = getAccessUrls(TEAM_DOMAIN);
 		const JWKS = createRemoteJWKSet(certsUrl);
-		await jwtVerify(token, JWKS, {
+		const { payload } = await jwtVerify(token, JWKS, {
 			issuer,
 			audience: POLICY_AUD,
 		});
+		if (!isAllowedAccessEmail(payload.email, ADMIN_ACCESS_EMAILS)) {
+			return c.text("Access identity is not an authorized inbox administrator", 403);
+		}
 	} catch {
 		return c.text("Invalid or expired Access token", 403);
 	}
 
-	// Authorization model note: once a teammate passes the shared Cloudflare
-	// Access policy, they can access all mailboxes in this app by design.
+	// Authorization model: allowlisted Access identities can operate all mailboxes.
+	// The application does not provide per-mailbox role separation.
 	return next();
 });
 

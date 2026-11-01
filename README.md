@@ -43,6 +43,14 @@ https://github.com/cloudflare/agentic-inbox/issues/4#issuecomment-4269118513
 - **Auto-draft on new email** — Agent automatically reads inbound emails and generates draft replies, always requiring explicit confirmation before sending
 - **Configurable and persistent** — Custom system prompts per mailbox, persistent chat history, streaming markdown responses, and tool call visibility
 
+## Administrator identity and MCP permissions
+
+This is designed for a **single operator or one trusted administrator group**. Every allowlisted identity can read and manage **all** mailboxes. There is no per-mailbox role separation.
+
+In addition to `POLICY_AUD` and `TEAM_DOMAIN`, production requires the Worker secret `ADMIN_ACCESS_EMAILS` containing the exact Cloudflare Access login email(s), separated by commas. Configure it with `wrangler secret put ADMIN_ACCESS_EMAILS` on your own account; never commit the value to Git. A missing value fails closed. Cloudflare service-token identities without an email claim are not accepted by this interface.
+
+MCP's `send_email`, `send_reply`, and `delete_email` tools are **disabled by default**. This prevents an external Agent from directly sending or permanently deleting mail merely because its instructions say to. To explicitly opt in, set `MCP_ALLOW_SEND=true` and/or `MCP_ALLOW_DELETE=true` in the Worker environment. Enabling send does **not** add a human-approval step. Reading, draft management and reversible folder actions remain available through MCP to authorized users.
+
 ## Attachment behavior in this fork
 
 - Uploaded images are sent with their original bytes. The previous automatic EXIF/ICC stripping has been removed because it could change orientation, color, or animation.
