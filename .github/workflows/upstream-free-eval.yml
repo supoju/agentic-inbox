@@ -34,6 +34,6 @@ jobs:
       - name: Install Wrangler in a separate directory
         run: npm install --prefix "$RUNNER_TEMP/upstream-wrangler" --no-save --package-lock=false wrangler@4.156.0
       - name: Create isolated R2 bucket (no production bucket changes)
-        run: "$RUNNER_TEMP/upstream-wrangler/node_modules/.bin/wrangler" r2 bucket create agentic-inbox-upstream-eval
+        run: |\n          "$RUNNER_TEMP/upstream-wrangler/node_modules/.bin/wrangler" r2 bucket create agentic-inbox-upstream-eval
       - name: Deploy isolated Worker without inbox.zecview.com route
-        run: "$RUNNER_TEMP/upstream-wrangler/node_modules/.bin/wrangler" deploy
+        run: |\n          "$RUNNER_TEMP/upstream-wrangler/node_modules/.bin/wrangler" deploy
