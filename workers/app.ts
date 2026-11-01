@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import { createRequestHandler } from "react-router";
 import { app as apiApp, receiveEmail } from "./index";
+import { forwardThenStoreInbound } from "./lib/inbound-forward";
 import { EmailMCP } from "./mcp";
 import type { Env } from "./types";
 import { isAllowedAccessEmail } from "./lib/access-policy";
@@ -159,12 +160,12 @@ app.all("*", async (c) => {
 export default {
 	fetch: app.fetch,
 	async email(
-		event: { raw: ReadableStream; rawSize: number },
+		event: { raw: ReadableStream; rawSize: number; to?: string; forward?: (destination: string) => Promise<void> },
 		env: Env,
 		ctx: ExecutionContext,
 	) {
 		try {
-			await receiveEmail(event, env, ctx);
+			await forwardThenStoreInbound(event, env.INBOUND_FORWARD_TO, () => receiveEmail(event, env, ctx));
 		} catch (e) {
 			console.error("Failed to process incoming email:", (e as Error).message, (e as Error).stack);
 			// Re-throw so Cloudflare's email routing can retry delivery or bounce the message.
