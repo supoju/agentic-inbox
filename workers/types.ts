@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export interface Env extends Cloudflare.Env {
+	/** Resend sending-only API key (Worker Secret); never commit the value. */
+	RESEND_API_KEY?: string;
 	POLICY_AUD: string;
 	TEAM_DOMAIN: string;
 	/** Comma-separated Cloudflare Access identities allowed to administer every mailbox. */

@@ -55,34 +55,129 @@ export function toBindingAttachmentContent(content: AttachmentContent): ArrayBuf
 }
 
 /**
- * Send an email using the Cloudflare Email Service binding.
- *
- * @param binding  - The `EMAIL` SendEmail binding from env
- * @param params   - Email parameters (to, from, subject, body, etc.)
- * @returns The send result with messageId
- * @throws On validation or delivery errors (error has `.code` property)
+ * Keep outbound transports explicit. Selecting Resend without a key is an error;
+ * never silently fall back to Cloudflare's verified-recipient-only Free transport.
  */
-export async function sendEmail(
-	binding: SendEmail,
+export interface EmailTransportEnv {
+	EMAIL?: SendEmail;
+	OUTBOUND_EMAIL_PROVIDER?: string;
+	RESEND_API_KEY?: string;
+}
+
+export interface EmailDeliveryResult {
+	/** Provider's RFC Message-ID, when it actually returns one. */
+	messageId?: string;
+	/** Resend's API resource ID is NOT a MIME Message-ID. */
+	providerId?: string;
+}
+
+/** Resend's REST API needs base64; Cloudflare's binding needs decoded bytes. */
+export function toResendAttachmentContent(content: AttachmentContent): string {
+	if (typeof content === "string") return content;
+	const bytes = content instanceof ArrayBuffer
+		? new Uint8Array(content)
+		: new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
+	const chunks: string[] = [];
+	for (let offset = 0; offset < bytes.length; offset += 8192) {
+		chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 8192)));
+	}
+	return btoa(chunks.join(""));
+}
+
+function formatAddress(address: string | { email: string; name: string }): string {
+	if (typeof address === "string") return address;
+	const name = address.name.replace(/[<>\r\n]/g, " ").trim();
+	return name ? `${name} <${address.email}>` : address.email;
+}
+
+/**
+ * Sends through Resend's HTTPS API. No third-party SDK or outbound network call
+ * is needed at build time. The fetch argument exists only for isolated tests.
+ */
+export async function sendViaResend(
+	apiKey: string | undefined,
 	params: SendEmailParams,
-): Promise<{ messageId: string }> {
+	fetcher: typeof fetch = fetch,
+): Promise<EmailDeliveryResult> {
+	if (!apiKey?.trim()) {
+		throw new Error("Resend sending is not configured: missing RESEND_API_KEY Worker secret");
+	}
+
+	const body: Record<string, unknown> = {
+		from: formatAddress(params.from),
+		to: params.to,
+		subject: params.subject,
+	};
+	if (params.html !== undefined) body.html = params.html;
+	if (params.text !== undefined) body.text = params.text;
+	if (params.cc) body.cc = params.cc;
+	if (params.bcc) body.bcc = params.bcc;
+	if (params.replyTo) body.reply_to = formatAddress(params.replyTo);
+	if (params.headers && Object.keys(params.headers).length) body.headers = params.headers;
+	if (params.attachments?.length) {
+		body.attachments = params.attachments.map((att) => ({
+			filename: att.filename,
+			content: toResendAttachmentContent(att.content),
+			content_type: att.type,
+			...(att.contentId ? { content_id: att.contentId } : {}),
+		}));
+	}
+
+	const response = await fetcher("https://api.resend.com/emails", {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${apiKey}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(body),
+	});
+	const payload = await response.json().catch(() => null) as
+		| { id?: unknown; message?: unknown; name?: unknown }
+		| null;
+	if (!response.ok) {
+		const reason = typeof payload?.message === "string"
+			? payload.message.slice(0, 300)
+			: typeof payload?.name === "string"
+				? payload.name.slice(0, 100)
+				: "provider rejected the request";
+		throw new Error(`Resend API error ${response.status}: ${reason}`);
+	}
+	if (typeof payload?.id !== "string" || !payload.id) {
+		throw new Error("Resend accepted the request without returning an email ID");
+	}
+	return { providerId: payload.id };
+}
+
+/** Send via the provider selected in the Worker configuration. */
+export async function sendEmail(
+	env: EmailTransportEnv,
+	params: SendEmailParams,
+	fetcher: typeof fetch = fetch,
+): Promise<EmailDeliveryResult> {
+	const provider = (env.OUTBOUND_EMAIL_PROVIDER ?? "cloudflare").trim().toLowerCase();
+	if (provider === "resend") {
+		return sendViaResend(env.RESEND_API_KEY, params, fetcher);
+	}
+	if (provider !== "cloudflare") {
+		throw new Error(`Unsupported outbound email provider: ${provider}`);
+	}
+	if (!env.EMAIL) {
+		throw new Error("Cloudflare Email Service binding is missing");
+	}
 	const message: Record<string, unknown> = {
 		to: params.to,
 		from: params.from,
 		subject: params.subject,
 	};
-
 	if (params.html) message.html = params.html;
 	if (params.text) message.text = params.text;
 	if (params.cc) message.cc = params.cc;
 	if (params.bcc) message.bcc = params.bcc;
 	if (params.replyTo) message.replyTo = params.replyTo;
-
 	if (params.headers && Object.keys(params.headers).length > 0) {
 		message.headers = params.headers;
 	}
-
-	if (params.attachments && params.attachments.length > 0) {
+	if (params.attachments?.length) {
 		message.attachments = params.attachments.map((att) => ({
 			content: toBindingAttachmentContent(att.content),
 			filename: att.filename,
@@ -91,8 +186,7 @@ export async function sendEmail(
 			...(att.contentId ? { contentId: att.contentId } : {}),
 		}));
 	}
-
-	const result = await binding.send(message as any);
+	const result = await env.EMAIL.send(message as any);
 	return { messageId: result.messageId };
 }
 
@@ -110,9 +204,10 @@ export function sendFailure(
 	let message = err?.message || String(e);
 	// Surface Email Sending domain-onboarding failures clearly for operators.
 	if (
-		code === "E_SENDER_NOT_VERIFIED" ||
-		code === "E_SENDER_DOMAIN_NOT_AVAILABLE" ||
-		/not verified|not available for sending|not onboarded/i.test(message)
+		!message.startsWith("Resend API error") &&
+		(code === "E_SENDER_NOT_VERIFIED" ||
+			code === "E_SENDER_DOMAIN_NOT_AVAILABLE" ||
+			/not verified|not available for sending|not onboarded/i.test(message))
 	) {
 		message =
 			`${message} — onboard this domain under Cloudflare Email Service → Email Sending ` +

@@ -56,7 +56,7 @@ export async function handleReplyEmail(c: AppContext) {
 	// Send synchronously so delivery errors reach the UI (see sendFailure).
 	let deliveredMessageId = outgoingMessageId;
 	try {
-		const sent = await sendEmail(c.env.EMAIL, {
+		const sent = await sendEmail(c.env, {
 			to,
 			cc,
 			bcc,
@@ -150,7 +150,7 @@ export async function handleForwardEmail(c: AppContext) {
 	// Send synchronously so delivery errors reach the UI (see sendFailure).
 	let deliveredMessageId = outgoingMessageId;
 	try {
-		const sent = await sendEmail(c.env.EMAIL, {
+		const sent = await sendEmail(c.env, {
 			to,
 			cc,
 			bcc,
