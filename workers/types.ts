@@ -3,8 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export interface Env extends Cloudflare.Env {
-	/** Select 'resend' to send to arbitrary legitimate recipients on Workers Free. */
-	OUTBOUND_EMAIL_PROVIDER?: string;
 	/** Resend sending-only API key (Worker Secret); never commit the value. */
 	RESEND_API_KEY?: string;
 	POLICY_AUD: string;
