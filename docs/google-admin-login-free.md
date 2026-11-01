@@ -38,7 +38,9 @@ or an authorization to create Google/Cloudflare resources.
    application** OAuth client. Set the **exact** authorized redirect URI to:
    `https://inbox.zecview.com/auth/callback`.
    If the consent screen is in testing, list `syaoyong@gmail.com` as a test
-   user. Only OpenID/email scopes are required.
+   user. Only OpenID/email scopes are required. **If Google asks you to enable
+   billing or authorize charges, pause and get explicit operator approval; do
+   not accept financial terms automatically.**
 2. On isolated Cloudflare Worker `agentic-inbox-test`, set these as encrypted
    Worker Secrets (do not put their values in Git or chat):
 
