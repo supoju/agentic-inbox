@@ -5,6 +5,8 @@
 
 > **Security hardening in progress (supoju fork).** Production deployment is not recommended until the first security pull requests have been reviewed and verified. Configure your own email domains and Cloudflare Access before sending real email. Pushes to main do **not** automatically deploy.
 
+> **No Zero Trust checkout:** The [Google administrator login option](docs/google-admin-login-free.md) protects `inbox.zecview.com` for `syaoyong@gmail.com` without activating a Cloudflare Zero Trust subscription. This is an unmerged test branch; OAuth client credentials and a live login review are still required.
+
 > **Workers Free outgoing mail:** Cloudflare Email Service cannot send to arbitrary recipients on Workers Free, even though the composer can address them. An [optional Resend Free transport](docs/resend-free-outbound.md) is implemented on this branch for legitimate external recipients. It requires its own verified sending domain and Worker Secret. **No live sending or public login is enabled until those credentials and a reviewed authentication alternative are in place.**
 
 Agentic Inbox lets you send, receive, and manage emails through a modern web interface -- all powered by your own Cloudflare account. Incoming emails arrive via [Cloudflare Email Routing](https://developers.cloudflare.com/email-routing/), each mailbox is isolated in its own [Durable Object](https://developers.cloudflare.com/durable-objects/) with a SQLite database, and attachments are stored in [R2](https://developers.cloudflare.com/r2/).
@@ -65,7 +67,7 @@ MCP's `send_email`, `send_reply`, and `delete_email` tools are **disabled by def
 - **Frontend:** React 19, React Router v7, Tailwind CSS, Zustand, TipTap, `@cloudflare/kumo`
 - **Backend:** Hono, Cloudflare Workers, Durable Objects (SQLite), R2, Email Routing
 - **AI Agent:** Cloudflare Agents SDK (`AIChatAgent`), AI SDK v6, Workers AI (`@cf/moonshotai/kimi-k2.5`), `react-markdown` + `remark-gfm`
-- **Auth:** Cloudflare Access JWT validation (required outside local development)
+- **Auth:** Cloudflare Access JWT or Google OpenID Connect single-admin session (select one; required outside local development)
 
 ## Getting Started
 
@@ -97,7 +99,7 @@ For internal Worker-to-Worker sending, use an explicitly authenticated service i
 - [Email Routing](https://developers.cloudflare.com/email-routing/) enabled for receiving
 - [Email Service](https://developers.cloudflare.com/email-service/) enabled for sending
 - [Workers AI](https://developers.cloudflare.com/workers-ai/) enabled (for the agent)
-- [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) configured for deployed/shared environments (required in production)
+- A configured authentication provider: [Google OIDC single-admin option](docs/google-admin-login-free.md) or [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) (production requires one, not both)
 
 Any user who passes the shared Cloudflare Access policy can access all mailboxes in this app by design. This includes the MCP server at `/mcp` -- external AI tools (Claude Code, Cursor, etc.) connected via MCP can operate on any mailbox by passing a `mailboxId` parameter. There is no per-mailbox authorization; the Cloudflare Access policy is the single trust boundary.
 
