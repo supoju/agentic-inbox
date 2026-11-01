@@ -204,9 +204,10 @@ export function sendFailure(
 	let message = err?.message || String(e);
 	// Surface Email Sending domain-onboarding failures clearly for operators.
 	if (
-		code === "E_SENDER_NOT_VERIFIED" ||
-		code === "E_SENDER_DOMAIN_NOT_AVAILABLE" ||
-		/not verified|not available for sending|not onboarded/i.test(message)
+		!message.startsWith("Resend API error") &&
+		(code === "E_SENDER_NOT_VERIFIED" ||
+			code === "E_SENDER_DOMAIN_NOT_AVAILABLE" ||
+			/not verified|not available for sending|not onboarded/i.test(message))
 	) {
 		message =
 			`${message} — onboard this domain under Cloudflare Email Service → Email Sending ` +
