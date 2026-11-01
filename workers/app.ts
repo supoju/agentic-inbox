@@ -42,6 +42,47 @@ function getAccessUrls(teamDomain: string) {
 // Main app that wraps the API and adds React Router fallback
 const app = new Hono<{ Bindings: Env }>();
 
+// Isolated Free-plan probe only. This branch is never routed to production email.
+// The deployed Worker requires a Cloudflare secret; no addresses or credentials
+// are committed. One attempt is recorded before sending to prevent repeat abuse.
+const evalProbePath = "/__free_email_probe_20261101";
+app.get(evalProbePath, (c) => c.html([
+  '<!doctype html><html><meta charset="utf-8"><title>Free Email Probe</title>',
+  '<body><h1>Isolated Cloudflare Email Sending probe</h1>',
+  '<form method="post">',
+  '<label>Test key <input type="password" name="key" required></label>',
+  '<label>Sender <input type="email" name="from" required></label>',
+  '<label>Recipient <input type="email" name="to" required></label>',
+  '<button type="submit">Send one test email</button></form></body></html>',
+].join("")));
+app.post(evalProbePath, async (c) => {
+  const data = await c.req.parseBody();
+  const key = typeof data.key === "string" ? data.key : "";
+  const secret = (c.env as Env & { EVAL_PROBE_SECRET?: string }).EVAL_PROBE_SECRET;
+  if (!secret || key !== secret) return c.text("Forbidden", 403);
+  const from = typeof data.from === "string" ? data.from.trim() : "";
+  const to = typeof data.to === "string" ? data.to.trim() : "";
+  if (!/^[^@\s]+@zecview\.com$/.test(from) || !/^[^@\s]+\+[^@\s]+@gmail\.com$/.test(to)) {
+    return c.text("Only a zecview.com sender and Gmail plus-address recipient are allowed", 400);
+  }
+  const marker = "probe/native-cloudflare-email-20261101-v1";
+  if (await c.env.BUCKET.head(marker)) return c.text("Probe already attempted", 409);
+  await c.env.BUCKET.put(marker, new Date().toISOString());
+  try {
+    const result = await c.env.EMAIL.send({
+      from,
+      to,
+      subject: "Cloudflare Workers Free native email probe 20261101",
+      text: "Controlled single-send test from the isolated upstream Worker.",
+    });
+    return c.json({ outcome: "accepted", messageId: result.messageId });
+  } catch (error) {
+    const e = error as { code?: string; message?: string };
+    return c.json({ outcome: "rejected", code: e.code || "", message: (e.message || "unknown error").slice(0, 300) }, 502);
+  }
+});
+
+
 // Cloudflare Access JWT validation middleware (production only)
 app.use("*", async (c, next) => {
 	// Skip validation in development
