@@ -528,7 +528,7 @@ export default function HomeRoute() {
           }
         }}
       >
-        <Dialog size="md" className="p-6">
+        <Dialog size="base" className="p-6">
           <Dialog.Title className="text-base font-semibold mb-2">
             同步 Cloudflare 邮箱
           </Dialog.Title>
