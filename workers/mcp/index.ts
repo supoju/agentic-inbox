@@ -22,6 +22,7 @@ import {
 } from "../lib/tools";
 import { Folders, FOLDER_TOOL_DESCRIPTION, MOVE_FOLDER_TOOL_DESCRIPTION } from "../../shared/folders";
 import type { Env } from "../types";
+import { isExplicitlyEnabled } from "../lib/access-policy";
 
 /** Wrap a plain result object into MCP content format. */
 function mcpText(result: unknown) {
@@ -303,6 +304,9 @@ export class EmailMCP extends McpAgent<Env> {
 				emailId: z.string().describe("The email ID to delete"),
 			},
 			async ({ mailboxId, emailId }) => {
+				if (!isExplicitlyEnabled(env.MCP_ALLOW_DELETE)) {
+					return mcpError("Permanent deletion through MCP is disabled. Set MCP_ALLOW_DELETE=true only after reviewing the risk.");
+				}
 				const denied = await verifyMailbox(mailboxId);
 				if (denied) return denied;
 				const result = await toolDeleteEmail(env, mailboxId, emailId);
@@ -313,7 +317,7 @@ export class EmailMCP extends McpAgent<Env> {
 		// ── send_reply ─────────────────────────────────────────────
 		this.server.tool(
 			"send_reply",
-			"Send a reply to an email. Only call after drafting and getting confirmation.",
+			"Send a reply to an email. Disabled by default; when enabled, no separate server-side approval is enforced.",
 			{
 				mailboxId: z.string().describe("The mailbox email address to send from"),
 				originalEmailId: z
@@ -324,6 +328,9 @@ export class EmailMCP extends McpAgent<Env> {
 				bodyHtml: z.string().describe("The HTML body of the reply"),
 			},
 			async ({ mailboxId, originalEmailId, to, subject, bodyHtml }) => {
+				if (!isExplicitlyEnabled(env.MCP_ALLOW_SEND)) {
+					return mcpError("Sending through MCP is disabled. Set MCP_ALLOW_SEND=true only if direct agent-triggered sends are acceptable.");
+				}
 				const denied = await verifyMailbox(mailboxId);
 				if (denied) return denied;
 				const result = await toolSendReply(env, mailboxId, {
@@ -355,7 +362,7 @@ export class EmailMCP extends McpAgent<Env> {
 		// ── send_email ─────────────────────────────────────────────
 		this.server.tool(
 			"send_email",
-			"Send a new email (not a reply). Only call after getting confirmation.",
+			"Send a new email. Disabled by default; when enabled, no separate server-side approval is enforced.",
 			{
 				mailboxId: z.string().describe("The mailbox email address to send from"),
 				to: z.string().email().describe("Recipient email address"),
@@ -363,6 +370,9 @@ export class EmailMCP extends McpAgent<Env> {
 				bodyHtml: z.string().describe("The HTML body of the email"),
 			},
 			async ({ mailboxId, to, subject, bodyHtml }) => {
+				if (!isExplicitlyEnabled(env.MCP_ALLOW_SEND)) {
+					return mcpError("Sending through MCP is disabled. Set MCP_ALLOW_SEND=true only if direct agent-triggered sends are acceptable.");
+				}
 				const denied = await verifyMailbox(mailboxId);
 				if (denied) return denied;
 				const result = await toolSendEmail(env, mailboxId, {
