@@ -9,6 +9,9 @@ export interface Env extends Cloudflare.Env {
 	SESSION_SIGNING_KEY?: string;
 	/** Resend sending-only API key (Worker Secret); never commit the value. */
 	RESEND_API_KEY?: string;
+	/** Mailjet v3.1 API credentials; both must be configured as Worker Secrets. */
+	MAILJET_API_KEY?: string;
+	MAILJET_SECRET_KEY?: string;
 	/** Existing Gmail destination verified in Cloudflare Email Routing. */
 	INBOUND_FORWARD_TO?: string;
 	/** Read-only token (Zone:Read + Email Routing Rules:Read) for the sync UI. */
