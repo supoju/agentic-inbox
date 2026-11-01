@@ -3,6 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export interface Env extends Cloudflare.Env {
+	/** Google OAuth credentials and random session signing key (all Worker Secrets). */
+	GOOGLE_OAUTH_CLIENT_ID?: string;
+	GOOGLE_OAUTH_CLIENT_SECRET?: string;
+	SESSION_SIGNING_KEY?: string;
 	/** Resend sending-only API key (Worker Secret); never commit the value. */
 	RESEND_API_KEY?: string;
 	POLICY_AUD: string;
