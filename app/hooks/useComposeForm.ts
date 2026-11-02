@@ -16,6 +16,7 @@ import {
 	toEmailListValue,
 } from "~/lib/utils";
 import { optimizeImageLossless } from "~/lib/lossless-image-optimizer";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from "../../shared/email-limits";
 import { useDeleteEmail, useForwardEmail, useReplyToEmail, useSaveDraft, useSendEmail } from "~/queries/emails";
 import { useMailbox } from "~/queries/mailboxes";
 import { useSignatureTemplate } from "~/queries/settings";
@@ -64,9 +65,9 @@ export interface PendingAttachment {
 	disposition: "attachment" | "inline";
 }
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB per file
-const MAX_TOTAL_SIZE = 50 * 1024 * 1024; // 50MB total
-const MAX_FILE_COUNT = 10;
+const MAX_FILE_SIZE = MAX_ATTACHMENT_BYTES;
+const MAX_TOTAL_SIZE = MAX_ATTACHMENT_BYTES;
+const MAX_FILE_COUNT = MAX_ATTACHMENT_COUNT;
 
 function getPrefixedSubject(subject: string, prefix: "Re" | "Fwd") {
 	const expectedPrefix = `${prefix}: `;
@@ -268,12 +269,12 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 			}
 
 			if (file.size > MAX_FILE_SIZE) {
-				setError(`文件 "${file.name}" 太大（无损压缩后仍超过 25MB 限制）。`);
+				setError(`文件 "${file.name}" 太大（无损压缩后仍超过 18 MiB 限制）。`);
 				continue;
 			}
 
 			if (totalSize + file.size > MAX_TOTAL_SIZE) {
-				setError(`附件总大小超过限制（最大 50MB）。`);
+				setError(`附件总大小超过限制（最大 18 MiB，含所有附件）。`);
 				break;
 			}
 
